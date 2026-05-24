@@ -1,0 +1,16 @@
+---
+description: NexusCore project status and architecture
+alwaysApply: false
+---
+# NexusCore
+
+## Stack
+Go backend (:8080) + Next.js frontend (:3000) + Redis, orchestrated via docker-compose.yml.
+
+## Current status
+- [Update this as you go] e.g. "Backend scaffolded; frontend not started"
+- Known issues: NEXT_PUBLIC_API_URL must be localhost for browser, backend hostname for SSR
+
+## Conventions
+- Health check: GET /api/health
+- Do not commit frontend/.env with secrets; use .env.example
