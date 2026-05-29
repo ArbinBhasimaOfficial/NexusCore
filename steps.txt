@@ -1,0 +1,287 @@
+================================================================================
+NexusCore — Step-by-step project build guide
+================================================================================
+Repo: https://github.com/ArbinBhasimaOfficial/NexusCore
+Stack: Go backend + Next.js frontend + Redis + Docker Compose
+
+Work from the repo root unless a step says otherwise.
+Check off each step as you complete it.
+
+================================================================================
+PHASE 0 — Prerequisites
+================================================================================
+
+Step 0.1  Install Docker and Docker Compose v2+
+          Verify: docker --version && docker compose version
+
+Step 0.2  Install Go 1.26+ (for local backend dev)
+          Verify: go version
+
+Step 0.3  Install Node.js 26+ and npm (for local frontend dev)
+          Verify: node --version && npm --version
+
+Step 0.4  Clone the repo (if you have not already)
+          git clone https://github.com/ArbinBhasimaOfficial/NexusCore.git
+          cd NexusCore
+
+================================================================================
+PHASE 1 — Repository hygiene
+================================================================================
+
+Step 1.1  Open .gitignore and add common ignores:
+
+          # Go
+          backend/server
+          *.exe
+
+          # Node / Next.js
+          frontend/node_modules/
+          frontend/.next/
+          frontend/out/
+
+          # Env (never commit secrets)
+          frontend/.env
+          frontend/.env.local
+          .env
+          .env.local
+
+          # OS / editor
+          .DS_Store
+          *.swp
+
+Step 1.2  Delete or fix frontend/.env if it still contains JavaScript.
+          That file must hold KEY=VALUE pairs only, not code.
+
+Step 1.3  Create frontend/.env.example (safe to commit):
+
+          NEXT_PUBLIC_API_URL=http://localhost:8080
+
+Step 1.4  Create frontend/.env for local dev (do NOT commit):
+
+          cp frontend/.env.example frontend/.env
+
+================================================================================
+PHASE 2 — Go backend
+================================================================================
+
+Step 2.1  Go to the backend directory:
+
+          cd backend
+
+Step 2.2  Initialize the Go module (use your module path):
+
+          go mod init github.com/ArbinBhasimaOfficial/NexusCore/backend
+
+Step 2.3  Add Redis client dependency:
+
+          go get github.com/redis/go-redis/v9
+
+Step 2.4  Create main.go with:
+          - HTTP server listening on :8080
+          - Read REDIS_ADDR from environment (default: localhost:6379)
+          - Connect to Redis on startup (log error if Redis is down)
+          - Route: GET /api/health → JSON { "status": "ok", "redis": "ok"|"error" }
+          - Enable CORS for http://localhost:3000 (browser calls from frontend)
+
+Step 2.5  Test locally (start Redis first — see Step 5.2 or use Docker redis only):
+
+          export REDIS_ADDR=localhost:6379
+          go run .
+
+          In another terminal:
+          curl http://localhost:8080/api/health
+
+          Expected: HTTP 200 with JSON body.
+
+Step 2.6  Tidy modules:
+
+          go mod tidy
+
+Step 2.7  Confirm backend/Dockerfile still matches your layout:
+          - COPY go.mod go.sum ./
+          - go build -o server .
+          - CMD ["./server"]
+
+          cd ..   (back to repo root)
+
+================================================================================
+PHASE 3 — Next.js frontend
+================================================================================
+
+Step 3.1  Go to the frontend directory:
+
+          cd frontend
+
+Step 3.2  Scaffold Next.js (App Router recommended):
+
+          npx create-next-app@latest . --typescript --eslint --app --src-dir --no-import-alias
+
+          If the folder is not empty (Dockerfile exists), confirm overwrite only
+          for new files or scaffold in a temp folder and merge manually.
+
+Step 3.3  Ensure package.json has scripts the Dockerfile expects:
+          - "build": "next build"
+          - "start": "next start"   (runs on port 3000 by default)
+
+Step 3.4  Create src/lib/api.ts (or similar) for API calls:
+
+          - Read base URL from process.env.NEXT_PUBLIC_API_URL
+          - Export a function checkHealth() that fetches GET /api/health
+
+          (Move any old JavaScript that was wrongly placed in .env into here.)
+
+Step 3.5  Add a simple home page that calls checkHealth() and shows status
+          (use fetch on the client or a Server Component — document which you use).
+
+Step 3.6  For local dev, set in frontend/.env:
+
+          NEXT_PUBLIC_API_URL=http://localhost:8080
+
+Step 3.7  Test frontend locally (backend must be running):
+
+          npm install
+          npm run dev
+
+          Open http://localhost:3000 and confirm health status displays.
+
+          cd ..   (back to repo root)
+
+================================================================================
+PHASE 4 — Docker Compose integration
+================================================================================
+
+Step 4.1  Review docker-compose.yml (already present). Services:
+          - redis   → port 6379
+          - backend → port 8080, env REDIS_ADDR=redis:6379
+          - frontend → port 3000, env NEXT_PUBLIC_API_URL=http://backend:8080
+
+Step 4.2  Understand API URL behavior:
+          - Inside Docker network: frontend container uses http://backend:8080
+          - Browser on your machine: must use http://localhost:8080
+
+          Options:
+          A) Use Server Components / server-side fetch with backend hostname
+          B) Set NEXT_PUBLIC_API_URL=http://localhost:8080 in compose for dev
+          C) Add a reverse proxy later (production)
+
+          Pick one approach and document it in README.md.
+
+Step 4.3  Build and start all services:
+
+          docker compose up --build
+
+          Wait until all three containers are healthy / running.
+
+Step 4.4  Verify from the host:
+
+          curl http://localhost:8080/api/health
+          Open http://localhost:3000 in a browser
+
+Step 4.5  Stop containers:
+
+          docker compose down
+
+================================================================================
+PHASE 5 — Optional local development without full Compose
+================================================================================
+
+Step 5.1  Terminal 1 — Redis only:
+
+          docker compose up redis
+
+Step 5.2  Terminal 2 — Backend:
+
+          cd backend
+          export REDIS_ADDR=localhost:6379
+          go run .
+
+Step 5.3  Terminal 3 — Frontend:
+
+          cd frontend
+          npm run dev
+
+================================================================================
+PHASE 6 — Documentation and agent context
+================================================================================
+
+Step 6.1  Update README.md "Project status" section:
+          - Move items from "Not started" to "Done" as you complete them
+          - Note any API URL choice from Phase 4
+
+Step 6.2  Update .cursor/rules/nexuscore-status.mdc:
+          - Set alwaysApply: true if you want every chat to load it
+          - Refresh "Current status" bullet list
+
+Step 6.3  Update this steps.txt if you change ports, module path, or stack versions.
+
+================================================================================
+PHASE 7 — Git commit and push
+================================================================================
+
+Step 7.1  Review what will be committed (never commit frontend/.env):
+
+          git status
+          git diff
+
+Step 7.2  Stage application code and config (not secrets):
+
+          git add .gitignore README.md steps.txt docker-compose.yml
+          git add backend/ frontend/
+          git add .cursor/rules/
+
+Step 7.3  Commit:
+
+          git commit -m "Scaffold Go backend, Next.js frontend, and Docker setup"
+
+Step 7.4  Push to GitHub:
+
+          git push origin main
+
+================================================================================
+PHASE 8 — Smoke test checklist
+================================================================================
+
+[ ]  curl http://localhost:8080/api/health returns 200
+[ ]  Redis connection reported correctly in health JSON
+[ ]  http://localhost:3000 loads without errors
+[ ]  Frontend shows backend health (or clear error message)
+[ ]  docker compose up --build succeeds from a clean clone
+[ ]  .env and secrets are not in git history
+
+================================================================================
+Troubleshooting
+================================================================================
+
+Problem: docker compose build fails on backend
+Fix:     Ensure backend/go.mod, go.sum, and main.go exist; run go mod tidy locally.
+
+Problem: docker compose build fails on frontend
+Fix:     Ensure package.json, package-lock.json, and next.config exist; run npm ci locally.
+
+Problem: Browser cannot reach API (network error)
+Fix:     Use http://localhost:8080 in NEXT_PUBLIC_API_URL for browser-side fetch,
+         or fetch from the Next.js server using http://backend:8080.
+
+Problem: Backend cannot connect to Redis
+Fix:     In Compose use REDIS_ADDR=redis:6379; locally use localhost:6379 with redis running.
+
+Problem: CORS errors in browser
+Fix:     Add Access-Control-Allow-Origin for http://localhost:3000 on the Go server.
+
+================================================================================
+Suggested order summary
+================================================================================
+
+  0 Prerequisites
+  1 .gitignore + env files
+  2 Go backend + /api/health
+  3 Next.js frontend + health UI
+  4 docker compose up --build
+  5 Optional local dev workflow
+  6 README + Cursor rule
+  7 Git commit / push
+  8 Smoke tests
+
+================================================================================
+End of steps.txt
+================================================================================

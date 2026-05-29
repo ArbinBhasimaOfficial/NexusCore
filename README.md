@@ -1,10 +1,12 @@
 # NexusCore
 
-Early-stage monorepo for a full-stack app: **Go API**, **Next.js frontend**, and **Redis**, containerized with Docker Compose.
+Monorepo for a full-stack banking-style app: **Go REST API**, **Next.js frontend** (planned), and **Docker Compose** for local orchestration.
 
 Repository: [ArbinBhasimaOfficial/NexusCore](https://github.com/ArbinBhasimaOfficial/NexusCore)
 
 ## Architecture
+
+**Target (Docker Compose):**
 
 ```
 Browser → frontend (:3000, Next.js)
@@ -14,46 +16,100 @@ Browser → frontend (:3000, Next.js)
            redis (:6379)
 ```
 
-| Service   | Port | Technology        |
-|-----------|------|-------------------|
-| frontend  | 3000 | Next.js (Node 26) |
-| backend   | 8080 | Go 1.26           |
-| redis     | 6379 | Redis 7 Alpine    |
+**Current backend (local dev):**
+
+```
+HTTP client → backend (:3000, Go + gorilla/mux)
+                    ↓
+              PostgreSQL (:5432)
+```
+
+| Component  | Port | Technology              | Status        |
+|------------|------|-------------------------|---------------|
+| backend    | 3000 | Go 1.26, gorilla/mux    | Implemented   |
+| PostgreSQL | 5432 | Postgres (local)        | Used by API   |
+| frontend   | 3000 | Next.js (Node 26)       | Not scaffolded |
+| redis      | 6379 | Redis 7 Alpine          | Compose only  |
+
+Compose still defines Redis and maps the backend to **8080**; the running server listens on **3000** and uses Postgres, not Redis. Align ports, storage, and env vars before relying on `docker compose up`.
 
 ## Project status
 
-**Phase:** Docker scaffolding only — not yet runnable end-to-end.
+**Phase:** Backend API with PostgreSQL — frontend and Docker path not wired end-to-end.
 
 ### Done
 
-- `docker-compose.yml` — three services with dependency order (`redis` → `backend` → `frontend`)
-- `backend/Dockerfile` — multi-stage Go build producing a `server` binary
-- `frontend/Dockerfile` — multi-stage Next.js build (`npm ci` → `build` → `start`)
-- `.cursor/rules/nexuscore-status.mdc` — agent context for stack and conventions
+- **Backend** — `go.mod`, account REST API, Postgres store (`storage.go`), `Makefile` (`build`, `run`, `test`)
+- **Docker scaffolding** — `docker-compose.yml`, `backend/Dockerfile`, `frontend/Dockerfile`
+- **Agent context** — `.cursor/rules/nexuscore-status.mdc`
+- **Build guide** — `steps.txt` (step-by-step checklist for the original Redis + health stack)
 
-### Not started
+### Not started / incomplete
 
-- **Backend:** no `go.mod`, `go.sum`, or application source (`main.go`, handlers, etc.)
-- **Frontend:** no `package.json`, Next.js app tree, or `next.config.*`
-- **API:** planned health endpoint `GET /api/health` (referenced in frontend snippet, not implemented)
-- **`.gitignore`:** file exists but is empty — should ignore `node_modules`, `.next`, binaries, and local env files
+- **Frontend:** no `package.json`, Next.js app, or `next.config.*`
+- **Docker integration:** backend port, Postgres service, and env-based DB config not aligned with Compose
+- **Health endpoint:** `GET /api/health` (planned in `steps.txt`, not implemented)
+- **`.gitignore`:** empty — should ignore `node_modules`, `.next`, `backend/bin/`, and local env files
+- **Secrets:** database URL is hardcoded in `storage.go`; move to environment variables
 
 ### Known issues
 
-1. **`frontend/.env`** — currently contains JavaScript, not environment variables. Move that logic into a proper module (e.g. API client) and use `.env.example` for `NEXT_PUBLIC_API_URL`.
-2. **`NEXT_PUBLIC_API_URL` in Compose** — `http://backend:8080` works for server-side calls inside Docker. Browser-side requests from the host need `http://localhost:8080` (or a reverse proxy).
-3. **Docker builds will fail** until backend and frontend application code exists.
+1. **Port mismatch** — `main.go` serves on `:3000`; Compose exposes `8080:8080`.
+2. **Storage mismatch** — API uses PostgreSQL; Compose only starts Redis.
+3. **`frontend/.env`** — may contain JavaScript instead of `KEY=VALUE` pairs; use `.env.example` and an API client module.
+4. **`NEXT_PUBLIC_API_URL`** — `http://backend:8080` works inside Docker; browser calls from the host need `http://localhost:8080` (or your actual backend port).
+5. **Transfer endpoint** — `POST /transfer` decodes JSON but does not persist transfers yet.
+
+## API (backend)
+
+Base URL when running locally: `http://localhost:3000`
+
+| Method | Path            | Description                    |
+|--------|-----------------|--------------------------------|
+| GET    | `/account`      | List all accounts              |
+| POST   | `/account`      | Create account (JSON body)     |
+| GET    | `/account/{id}` | Get account by ID              |
+| DELETE | `/account/{id}` | Delete account by ID           |
+| POST   | `/transfer`     | Transfer request (stub)        |
+
+**Create account body:**
+
+```json
+{
+  "FirstName": "Jane",
+  "LastName": "Doe"
+}
+```
+
+**Transfer body:**
+
+```json
+{
+  "toAccount": 2,
+  "amount": 100
+}
+```
+
+Responses are JSON. Errors return `{ "error": "..." }` with HTTP 400.
 
 ## Repository layout
 
 ```
 NexusCore/
 ├── backend/
-│   └── Dockerfile          # Expects go.mod + Go source at build time
+│   ├── main.go           # Entry: Postgres store + HTTP server
+│   ├── api.go            # Routes and handlers
+│   ├── storage.go        # Postgres implementation
+│   ├── types.go          # Account, requests
+│   ├── Makefile          # build, run, test
+│   ├── Dockerfile
+│   ├── go.mod / go.sum
+│   └── bin/              # Built binary (nexuscore)
 ├── frontend/
-│   ├── Dockerfile          # Expects package.json + Next.js app
-│   └── .env                # Misplaced; should be refactored (see above)
+│   ├── Dockerfile
+│   └── .env              # Fix or replace with .env.example
 ├── docker-compose.yml
+├── steps.txt             # Full build checklist
 ├── .cursor/rules/
 │   └── nexuscore-status.mdc
 ├── .gitignore
@@ -62,12 +118,40 @@ NexusCore/
 
 ## Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) and Docker Compose v2+
-- For local development (once scaffolded): Go 1.26+, Node.js 26+
+- [Docker](https://docs.docker.com/get-docker/) and Docker Compose v2+ (for Compose workflow)
+- **Go 1.26+** — local backend development
+- **PostgreSQL** — running locally with a database the app can connect to (see `storage.go` for connection settings; configure before first run)
+- **Node.js 26+** — when the frontend is scaffolded
+
+## Running the backend locally
+
+1. Start PostgreSQL and ensure the database exists and matches your connection settings in `storage.go` (or update the connection string).
+2. From `backend/`:
+
+```bash
+make run
+```
+
+Or manually:
+
+```bash
+go build -o bin/nexuscore .
+./bin/nexuscore
+```
+
+3. Example requests:
+
+```bash
+curl -s http://localhost:3000/account
+curl -s -X POST http://localhost:3000/account \
+  -H 'Content-Type: application/json' \
+  -d '{"FirstName":"Jane","LastName":"Doe"}'
+curl -s http://localhost:3000/account/1
+```
 
 ## Running with Docker
 
-When backend and frontend source are in place:
+When backend and frontend match the Compose layout (port **8080**, dependencies, env vars):
 
 ```bash
 docker compose up --build
@@ -75,34 +159,25 @@ docker compose up --build
 
 | URL | Service |
 |-----|---------|
-| http://localhost:3000 | Frontend |
-| http://localhost:8080 | Backend API |
+| http://localhost:3000 | Frontend (when added) |
+| http://localhost:8080 | Backend API (Compose default) |
 | localhost:6379 | Redis |
 
-Backend environment (set in Compose):
-
-| Variable     | Value (in Compose) |
-|--------------|--------------------|
-| `REDIS_ADDR` | `redis:6379`       |
-
-Frontend environment:
-
-| Variable               | Compose default           | Notes |
-|------------------------|---------------------------|-------|
-| `NEXT_PUBLIC_API_URL`  | `http://backend:8080`     | Use `http://localhost:8080` for browser access from the host |
+Until the backend is updated for Compose, prefer local `make run` with Postgres.
 
 ## Conventions
 
-- Health check endpoint: **`GET /api/health`**
-- Do not commit secrets; use `frontend/.env.example` with documented variables
+- Prefer **environment variables** for database and Redis addresses (do not commit secrets).
+- Health check (planned): **`GET /api/health`**
 - Pin base images in Dockerfiles (`golang:1.26.3-alpine`, `node:26.2.0-alpine`)
 
 ## Next steps
 
-1. Scaffold Go backend: `go mod init`, HTTP server on `:8080`, Redis client, `GET /api/health`
-2. Scaffold Next.js frontend and wire API URL for dev vs Docker
-3. Populate `.gitignore` and add `frontend/.env.example`
-4. Verify `docker compose up --build` runs all three services
+1. Externalize Postgres config (`DATABASE_URL` or similar) and add Postgres to `docker-compose.yml`.
+2. Align backend listen port with Compose (`:8080`) or update Compose port mapping.
+3. Scaffold Next.js frontend and `frontend/.env.example`.
+4. Implement `GET /api/health` and optional Redis ping if Redis stays in the stack.
+5. Populate `.gitignore` and verify `docker compose up --build` from a clean clone.
 
 ## License
 
